@@ -7,6 +7,7 @@ import eu.kidf.divapi.Domain;
 import eu.kidf.divapi.IDivAPI;
 import java.io.File;
 import java.io.IOException;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -24,7 +25,10 @@ public class Word2VecAdaptor implements IDivAPI {
     
     // the similarity theshold was set empirically
     // based on an ontology matching experiment
-    public static final double SIMILARITY_THRESHOLD = 0.66;
+    public double SIMILARITY_THRESHOLD = 0.66;
+    
+    // the number of top related/similar words to return
+    public int NB_RELATED_WORDS = 10;
     
     private final Word2Vec dic;
     private Double threshold;
@@ -46,12 +50,25 @@ public class Word2VecAdaptor implements IDivAPI {
 
     @Override
     public Set<String> getRelatedWords(String language, Domain domain, String word, WordRelation rel) {
-        throw new UnsupportedOperationException("Not supported yet."); 
+        if (rel.equals(IDivAPI.WORD_ANTONYMY) || rel.equals(IDivAPI.WORD_SYNONYMY)) {
+            throw new UnsupportedOperationException("Word vector models do not support antonymy or synonymy relations."); 
+        }
+        Collection<String> nearestWords = dic.wordsNearest(word, NB_RELATED_WORDS);
+        if (nearestWords == null) {
+            return new HashSet<>();
+        }
+        return new HashSet<>(nearestWords);
     }
 
     @Override
     public Map<String, Double> getRelatedWordsWeighted(String language, Domain domain, String word, WordRelation rel) {
-        throw new UnsupportedOperationException("Not supported yet."); 
+        Set<String> relWords = getRelatedWords(language, domain, word, rel);
+        Map<String, Double> wordMap = new HashMap<>();
+        for (String w : relWords) {
+            Double sim = getSimilarity(word, w);
+            wordMap.put(w, sim);
+        }
+        return wordMap;
     }
 
     @Override
@@ -69,7 +86,7 @@ public class Word2VecAdaptor implements IDivAPI {
     @Override
     public Map<WordRelation, Double> getRelationsWeighted(String language, Domain domain, String word1, String word2) {
         Map<WordRelation, Double> relMap = new HashMap<>();
-        Double sim = normalizeSimilarity(dic.similarity(word1, word2));
+        Double sim = getSimilarity(word1, word2);
         relMap.put(IDivAPI.WORD_RELATEDNESS, sim);
         relMap.put(IDivAPI.WORD_SIMILARITY, sim);
         return relMap;
@@ -149,12 +166,22 @@ public class Word2VecAdaptor implements IDivAPI {
 
     @Override
     public Set<Concept> getRelatedConcepts(Concept concept, Set<ConceptRelation> relations) {
-        throw new UnsupportedOperationException("Not supported yet."); 
+        Set<String> relWords = getRelatedWords(null, null, concept.getID(), IDivAPI.WORD_RELATEDNESS);
+        Set<Concept> relConcepts = new HashSet<>();
+        for (String w : relWords) {
+            relConcepts.add(new Concept(w, w));
+        }
+        return relConcepts;
     }
 
     @Override
     public Map<Concept, Double> getRelatedConceptsWeighted(Concept concept, Set<ConceptRelation> relations) {
-        throw new UnsupportedOperationException("Not supported yet."); 
+        Map<String, Double> relWords = getRelatedWordsWeighted(null, null, concept.getID(), IDivAPI.WORD_RELATEDNESS);
+        Map<Concept, Double> relConcepts = new HashMap<>();
+        for (String w : relWords.keySet()) {
+            relConcepts.put(new Concept(w, w), relWords.get(w));
+        }
+        return relConcepts;
     }
 
     @Override
@@ -210,6 +237,10 @@ public class Word2VecAdaptor implements IDivAPI {
     private WordVector getWordVector(String word) {
         WordVector wordVector = new WordVector(word, word); 
         return wordVector;
+    }
+    
+    private Double getSimilarity(String word1, String word2) {
+        return normalizeSimilarity(dic.similarity(word1, word2));
     }
     
     private Double normalizeSimilarity(Double similarity) {
